@@ -1,0 +1,5 @@
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pandas>=1.5.0
+openpyxl>=3.0.0 # If using xlsx
+python-dotenv>=1.0.0
