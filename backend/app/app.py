@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 # --- Configuration ---
 load_dotenv()
-DATA_FILE_PATH = os.getenv("DATA_FILE_PATH", "../data/data.xlsx")
+DATA_FILE_PATH = os.getenv("DATA_FILE_PATH", "/code/data/data.xlsx")
 BUILDING_COLUMN = "BuildingName"
 LATITUDE_COLUMN = "Latitude"
 LONGITUDE_COLUMN = "Longitude"
@@ -66,7 +66,7 @@ app = FastAPI(
 )
 
 # --- CORS Middleware --- (Adjust origins for production)
-origins = ["http://localhost", "http://localhost:8501"]
+origins = ["http://localhost", "http://localhost:8501", "https://my-uni-map-app-frontend-49f50cf71ca2.herokuapp.com/"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"],

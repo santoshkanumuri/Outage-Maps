@@ -1,0 +1,7 @@
+# This file is used to configure the Heroku deployment for the Streamlit app
+# It specifies the build and run commands for the Docker container
+build:
+  docker:
+    web: Dockerfile # Specifies the Dockerfile to use for the 'web' process
+run:
+  web: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.enableCORS false --server.enableXsrfProtection false # Command to run the streamlit app

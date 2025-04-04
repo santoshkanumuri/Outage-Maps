@@ -7,10 +7,12 @@ from streamlit_folium import st_folium
 import os
 from dotenv import load_dotenv
 import logging
+from folium.plugins import MarkerCluster
 
 # --- Configuration ---
 load_dotenv()
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://my-uni-map-api-41bdbd00fbb7.herokuapp.com/")
+# API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000") # Localhost for development
 # --- !!! IMPORTANT: Ensure this matches the backend endpoint that serves BOTH statuses !!! ---
 API_ENDPOINT = f"{API_BASE_URL}/api/building-status"
 DEFAULT_MAP_CENTER = [33.58452231722856, -101.87542936763231] # TTU Approx Center
@@ -58,14 +60,13 @@ def fetch_data(url: str):
         st.error(f"An unexpected error occurred while processing data: {e}", icon="💥")
         return None
 
-# --- MODIFIED: Function now accepts the status type to display ---
 def create_building_map(df: pd.DataFrame, status_to_display: str):
-    """Creates a Folium map with building markers colored by the selected status type."""
+    """Creates a Folium map with clustered building markers using Circle markers
+       that scale with zoom and display clean popups without tooltips."""
     if df is None or df.empty:
         st.warning("No building data available to display.")
         return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=13)
 
-    # --- Determine which status column and label to use ---
     if status_to_display == "WiFi Status":
         status_column = 'WifiStatus'
         status_label = "WiFi"
@@ -76,83 +77,93 @@ def create_building_map(df: pd.DataFrame, status_to_display: str):
         st.error("Invalid status type selected.")
         return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=13)
 
-    logger.info(f"Creating map for: {status_label} Status")
-
-    # Drop rows with invalid coordinates (using lowercase column names)
     df_valid = df.dropna(subset=['Latitude', 'Longitude']).copy()
-    if len(df_valid) < len(df):
-        st.warning(f"Excluded {len(df) - len(df_valid)} buildings due to missing coordinates.", icon="⚠️")
-
     if df_valid.empty:
         st.warning("No buildings with valid coordinates found.")
         return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=13)
 
-    # Create GeoDataFrame (using lowercase column names)
-    try:
-        gdf = gpd.GeoDataFrame(
-            df_valid,
-            geometry=gpd.points_from_xy(df_valid.Longitude, df_valid.Latitude),
-            crs="EPSG:4326"
-        )
-        logger.info(f"Created GeoDataFrame with {len(gdf)} buildings.")
-    except Exception as e:
-        logger.exception("Failed to create GeoDataFrame.")
-        st.error(f"Error creating geographic data: {e}", icon="❌")
-        return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=13)
+    gdf = gpd.GeoDataFrame(
+        df_valid,
+        geometry=gpd.points_from_xy(df_valid.Longitude, df_valid.Latitude),
+        crs="EPSG:4326"
+    )
 
-    # Calculate map center or use default
     center_lat = gdf.geometry.y.mean() if not gdf.empty else DEFAULT_MAP_CENTER[0]
     center_lon = gdf.geometry.x.mean() if not gdf.empty else DEFAULT_MAP_CENTER[1]
     map_center = [center_lat, center_lon]
 
     m = folium.Map(location=map_center, zoom_start=DEFAULT_ZOOM, control_scale=True)
-
-    # Add Google Maps Tile Layer (Kept from original)
     google_maps_tile = folium.TileLayer(
         tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}",
         attr="© Google Maps",
-        name="Google Maps Street" # Renamed slightly for clarity
+        name="Google Maps Street"
     )
     google_maps_tile.add_to(m)
 
-    color_map = {'active': 'green', 'inactive': 'red'}
+    marker_cluster = MarkerCluster(
+        icon_create_function='''
+            function(cluster) {
+                var markers = cluster.getAllChildMarkers();
+                var count = cluster.getChildCount();
+                var redCount = 0;
+                var greenCount = 0;
 
-    # Add markers to the map
+                for (var i = 0; i < markers.length; i++) {
+                    if (markers[i].options.fillColor === 'red') {
+                        redCount++;
+                    } else {
+                        greenCount++;
+                    }
+                }
+
+                var redRatio = redCount / count;
+                var greenRatio = greenCount / count;
+
+                var color = redCount > 0 ? 'rgba(255,0,0,' + (0.4 + redRatio * 0.6) + ')' : 'rgba(0,128,0,' + (0.4 + greenRatio * 0.6) + ')';
+                var size = Math.min(50, Math.max(20, count * 2));
+
+                return L.divIcon({
+                    html: '<div style="width:' + size + 'px; height:' + size + 'px; border-radius:50%; background:' + color + '; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">' + count + '</div>',
+                    className: 'marker-cluster',
+                    iconSize: new L.Point(size, size)
+                });
+            }
+        '''
+    )
+    marker_cluster.add_to(m)
+
     for idx, row in gdf.iterrows():
-        # Use lowercase 'building_name' from DataFrame
-        building_name = row['BuildingName']
-        # --- Get status from the CORRECT column based on selection ---
-        status = row[status_column]
-        color = color_map.get(str(status).lower(), 'gray') # Ensure status is string and lowercase
+        status = str(row[status_column]).lower()
+        color = 'green' if status == 'active' else 'red'
 
-        # --- Updated popup to show BOTH statuses for context ---
         popup_html = f"""
-        <b>Building:</b> {building_name}<br>
-        <hr style='margin: 3px 0;'>
-        <b>{status_label} Status: <span style="color:{color};">{str(status).capitalize()}</span></b><br>
-        <hr style='margin: 3px 0;'>
-        <i>WiFi: {str(row['WifiStatus']).capitalize()}</i><br>
-        <i>Audio: {str(row['AudioStatus']).capitalize()}</i><br>
-        <i>Coords: ({row.geometry.y:.4f}, {row.geometry.x:.4f})</i>
+        <div style="font-family: Arial, sans-serif; padding: 5px;">
+            <b style="font-size: 14px;">Building:</b> {row['BuildingName']}<br>
+            <hr style="margin: 3px 0; border: 0; border-top: 1px solid #ccc;">
+            <b style="font-size: 14px;">{status_label} Status:
+                <span style="color:{color};">{status.capitalize()}</span>
+            </b><br>
+            <hr style="margin: 3px 0; border: 0; border-top: 1px solid #ccc;">
+            <i>WiFi: {str(row['WifiStatus']).capitalize()}</i><br>
+            <i>Audio: {str(row['AudioStatus']).capitalize()}</i><br>
+            <i>Coords: ({row.geometry.y:.4f}, {row.geometry.x:.4f})</i>
+        </div>
         """
         popup = folium.Popup(popup_html, max_width=300)
 
-        # --- Updated tooltip to reflect the selected status ---
-        tooltip_text = f"{building_name} ({status_label}: {str(status).capitalize()})"
-
-        folium.CircleMarker(
+        folium.Circle(
             location=[row.geometry.y, row.geometry.x],
-            radius=20, # Kept large radius from original
+            radius=10,
             color=color,
             fill=True,
             fill_color=color,
             fill_opacity=0.7,
             popup=popup,
-            tooltip=tooltip_text
-        ).add_to(m)
+            tooltip=None
+        ).add_to(marker_cluster)
 
-    logger.info(f"Added {len(gdf)} building markers to Folium map for {status_label} status.")
     return m
+
 
 
 # --- Streamlit App Layout ---
