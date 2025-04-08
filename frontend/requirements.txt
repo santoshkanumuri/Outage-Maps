@@ -9,3 +9,4 @@ folium>=0.14.0    # Or latest version
 streamlit-folium>=0.10.0 # Or latest version
 # Pillow is often a dependency of geopandas/folium, but good to list
 Pillow>=9.0.0
+pymongo
