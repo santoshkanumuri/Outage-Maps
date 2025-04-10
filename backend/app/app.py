@@ -12,7 +12,7 @@ import numpy as np # Import numpy for NaN checks
 
 # --- Configuration ---
 load_dotenv()
-DATA_FILE_PATH = os.getenv("DATA_FILE_PATH", "../data/data.xlsx") # Default to data.xlsx in parent directory
+DATA_FILE_PATH = os.getenv("DATA_FILE_PATH", "../data/joined_room.xlsx") # Default to a relative path, adjust as needed
 
 # --- Updated Column Names to Match New Excel Structure ---
 # Check exact spelling and casing in your Excel file

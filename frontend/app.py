@@ -106,7 +106,6 @@ def date_calc(temp_days: int) -> int:
         # Return current time, effectively expiring immediately or handle as error
         return int(time.time())
 
-
 def validate_user_input(username: str, password: str, temp_days: str) -> list:
     """Validate the username, password, and temporary access days."""
     errors = []
@@ -123,9 +122,6 @@ def validate_user_input(username: str, password: str, temp_days: str) -> list:
     # if not is_valid_name(name): errors.append("Name can only contain letters and spaces (1-50 chars).")
     return errors
 
-# --- User Management Functions ---
-# (Authentication, Add, Delete, Extend, Modify - remain largely unchanged)
-# Minor adjustments for robustness and logging
 def authenticate(username: str, password: str) -> bool:
     """Authenticate the user by checking the username and password."""
     users = get_users_collection()
@@ -241,7 +237,6 @@ def add_user(name: str, username: str, password: str, is_admin: bool, temp_days:
         logger.error(f"Add User (General) Error for {username}: {e}")
         return False
 
-
 def delete_user(current_username: str, username_to_delete: str) -> bool:
     """Delete a user from the users collection."""
     users = get_users_collection()
@@ -284,7 +279,6 @@ def delete_user(current_username: str, username_to_delete: str) -> bool:
         logger.error(f"Delete User (General) Error for {username_to_delete}: {e}")
         return False
 
-
 def get_all_usernames() -> list:
     """Get all usernames from the users collection."""
     users = get_users_collection()
@@ -300,7 +294,6 @@ def get_all_usernames() -> list:
         st.error(f"Database error occurred while fetching usernames: {e}")
         logger.error(f"Get All Usernames (MongoDB) Error: {e}")
         return []
-
 
 def extend_access(current_username: str, username_to_extend: str, temp_days: str) -> bool:
     """Extend user access by a specified number of days."""
@@ -479,7 +472,7 @@ def create_room_map(df: pd.DataFrame, selected_statuses: list, filter_mode: str,
     if df is None or df.empty:
         st.warning("No room data available to display.")
         # Return a basic map centered on TTU
-        return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=13, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="© Google Maps Street")
+        return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=DEFAULT_ZOOM_ALL, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="© Google Maps Street")
 
     # --- 1. Filter Data Based on Selections ---
     gdf_display = df.copy()
@@ -528,7 +521,7 @@ def create_room_map(df: pd.DataFrame, selected_statuses: list, filter_mode: str,
     except Exception as e:
          st.error(f"Error creating GeoDataFrame: {e}")
          logger.error(f"GeoDataFrame creation failed: {e}")
-         return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=13, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="© Google Maps Street")
+         return folium.Map(location=DEFAULT_MAP_CENTER, zoom_start=DEFAULT_ZOOM_ALL, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="© Google Maps Street")
 
 
     # --- 3. Determine Map Center and Zoom ---
@@ -553,66 +546,75 @@ def create_room_map(df: pd.DataFrame, selected_statuses: list, filter_mode: str,
         zoom = DEFAULT_ZOOM_ALL
 
     # --- 4. Create Folium Map ---
-    m = folium.Map(location=map_center, zoom_start=zoom, control_scale=True, tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", attr="© Google Maps")
+    m = folium.Map(location=map_center, zoom_start=zoom, control_scale=True, 
+               tiles="https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", 
+               attr="© Google Maps")
 
-# Add Tile Layers (allowing user choice)
-
-
-
-
-    # --- 5. Define Marker Cluster ---
-    # Simplified cluster logic: Red if > N% inactive, Green otherwise
-    # Requires determining 'display_status' for each point first
+    # --- 5. Apply Display Status to Each Point ---
     def get_display_status(row, selected_sts):
         is_inactive = False
         if "WiFi Status" in selected_sts and row['WifiStatus'] == 'inactive':
             is_inactive = True
         if "Audio Status" in selected_sts and row['AudioStatus'] == 'inactive':
             is_inactive = True
-        # If no statuses are selected, default to active? Or maybe handle this upstream.
-        # Assuming at least one status is always selected if we reach here with data.
         return 'inactive' if is_inactive else 'active'
 
-    # Apply this logic to determine color *before* adding marker
+    # Apply this logic to determine color before adding marker
     gdf['display_status'] = gdf.apply(lambda row: get_display_status(row, selected_statuses), axis=1)
 
+    # --- 5. Define Marker Cluster with Special Configuration ---
     marker_cluster = MarkerCluster(
-         name="Room Status", # Layer name
+         name="Room Status",
          overlay=True,
          control=True,
-         # Updated JS function for clustering based on 'inactive' count
+         # IMPORTANT: Add these options to control clustering behavior
+         options={
+             'disableClusteringAtZoom': 19,  # Lower zoom level to see individual points sooner
+             'maxClusterRadius': 25,        # Reduce cluster radius for better room separation
+             'showCoverageOnHover': True,   # Show the bounds of clusters on hover
+             'zoomToBoundsOnClick': True,   # Zoom to bounds when a cluster is clicked
+             'spiderfyOnMaxZoom': False     # Disable spiderfying (we'll use disableClusteringAtZoom instead)
+         },
+         # Updated JS function with better priority handling for inactive markers
          icon_create_function='''
             function(cluster) {
                 var markers = cluster.getAllChildMarkers();
+                console.log(markers); // Debugging output
                 var count = cluster.getChildCount();
                 var inactiveCount = 0;
-                // Access the custom property set during marker creation
+                
+                // Check each marker's options to find the status
                 for (var i = 0; i < markers.length; i++) {
-                     // Check the 'data-status' attribute we will add
-                    if (markers[i].options.icon.options.markerColor === 'red') {
+                    if (markers[i].options && markers[i].options.color === 'red') {
                         inactiveCount++;
                     }
                 }
 
+                // Calculate inactive ratio for color intensity
                 var inactiveRatio = inactiveCount / count;
-                // Determine cluster color: more red as the proportion of inactive increases
                 var color;
+                console.log(inactiveCount, count, inactiveRatio); // Debugging output
+                // Color logic with priority to red (inactive)
                 if (inactiveCount > 0) {
-                   // Adjust opacity based on ratio, ensuring base visibility
-                   var opacity = 0.5 + (inactiveRatio * 0.5);
-                   color = 'rgba(255, 0, 0, ' + opacity + ')'; // Red, semi-transparent
+                    // If ANY markers are inactive, use red with variable opacity
+                    // Higher % of inactive = more intense red
+                    var opacity = Math.max(0.7, inactiveRatio);  // At least 70% opacity, up to 100%
+                    var redIntensity = Math.min(255, 200 + (inactiveRatio * 55)); // More intense red for higher ratios
+                    color = 'rgba(' + redIntensity + ', 0, 0, ' + opacity + ')';
                 } else {
-                   color = 'rgba(0, 128, 0, 0.8)'; // Solid Green
+                    // All markers active - use solid green
+                    color = 'rgba(0, 250, 0, 0.9)';
                 }
 
-                // Scale size logarithmically or similar to avoid huge clusters
-                var size = 30 + Math.log2(count + 1) * 5; // Example scaling
-                size = Math.min(60, size); // Max size limit
-
+                // Scale size logarithmically to avoid huge clusters
+                var size = 20 + Math.log2(count + 1) * 5;
+                size = Math.min(40, size); // Cap at max size
+                
+                // Create cluster icon with count displayed
                 return L.divIcon({
                     html: '<div style="width:' + size + 'px; height:' + size + 'px; border-radius:50%; background:' + color + '; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: bold; border: 1px solid rgba(0,0,0,0.5);">' + count + '</div>',
-                    className: 'marker-cluster marker-cluster-large', // Use default Leaflet classes if possible
-                    iconSize: new L.Point(size, size)
+                    className: 'marker-cluster',
+                    iconSize: L.point(size, size)
                 });
             }
         '''
@@ -647,31 +649,24 @@ def create_room_map(df: pd.DataFrame, selected_statuses: list, filter_mode: str,
             <i>Coords: ({row.geometry.y:.5f}, {row.geometry.x:.5f})</i><br>
             <b>Last Updated:</b><br>
             <i>{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row.get('last_updated', time.time())))}</i><br>
-
         </div>
         """
         popup = folium.Popup(popup_html, max_width=300)
-
-        # Using simpler CircleMarkers which are often better for many points
+        
+        # Create Circle marker instead of Marker with icon
         folium.Circle(
             location=[row.geometry.y, row.geometry.x],
-            radius=3, # Smaller radius for rooms
-            color=color, # Border color
+            radius=3,  # Small radius for rooms (in meters)
+            color=color,
             fill=True,
-            fill_color=color, # Fill color
-            fill_opacity=0.7,
+            fill_color=color,
+            fill_opacity=0.8,
             popup=popup,
-            # Custom attribute for the cluster function - use icon color directly now
-            # icon=folium.Icon(color=color) # This doesn't work directly with CircleMarker for clustering access
-                                            # Instead, the JS cluster function checks the marker's *actual* rendered color/options if possible,
-                                            # or we rely on the logic using `markerColor` property of the icon if using regular Markers.
-                                            # Let's stick to CircleMarker and adapt JS if needed.
-                                            # *Correction*: For CircleMarker, direct property access is hard in cluster func.
-                                            # Let's use regular Markers with Icons for easier status access in JS cluster function.
-        ).add_to(marker_cluster) # Add marker to the cluster group
-
-
-    # --- 7. Add Layer Control ---
+            tooltip=None,  # Disable tooltip to avoid overlap with popup
+            # Add custom properties as a dictionary in the Circle object
+            **{"status": row['display_status']}  # This is how we pass status to Circle
+        ).add_to(marker_cluster)
+        # --- 7. Add Layer Control ---
     folium.LayerControl().add_to(m)
 
     return m
